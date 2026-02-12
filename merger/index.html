@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Merger Pro + Jira Sync</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=Fira+Code&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #f8fafc; overflow-x: hidden; }
+        .mono { font-family: 'Fira Code', monospace; }
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        const Icon = ({ d, className = "w-5 h-5" }) => (
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
+            </svg>
+        );
+
+        const paths = {
+            check: "M5 13l4 4L19 7",
+            logout: "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
+            terminal: "M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
+            chevron: "M19 9l-7 7-7-7",
+            github: "M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22",
+            alert: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+            copy: "M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3",
+            jira: "M11.5 3h-4a1 1 0 00-1 1v4h4a1 1 0 001-1V4a1 1 0 00-1-1zM11.5 10.5h-4a1 1 0 00-1 1v4h4a1 1 0 001-1v-4a1 1 0 00-1-1zM18.5 10.5h-4a1 1 0 00-1 1v4h4a1 1 0 001-1v-4a1 1 0 00-1-1z",
+            search: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
+            lightning: "M13 10V3L4 14h7v7l9-11h-7z",
+            compare: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
+            rocket: "M13 10V3L4 14h7v7l9-11h-7z"
+        };
+
+        const SearchableDropdown = ({ label, items, selected, onSelect, placeholder }) => {
+            const [isOpen, setIsOpen] = useState(false);
+            const [query, setQuery] = useState('');
+            const containerRef = useRef(null);
+            const filtered = useMemo(() => items.filter(i => i.name.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' })), [items, query]);
+            useEffect(() => { const handleClickOutside = (e) => { if (containerRef.current && !containerRef.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', handleClickOutside); return () => document.removeEventListener('mousedown', handleClickOutside); }, []);
+            return (
+                <div className="relative" ref={containerRef}>
+                    <label className="text-xs font-bold text-slate-400 block mb-2 ml-1">{label}</label>
+                    <div onClick={() => setIsOpen(!isOpen)} className="w-full bg-slate-950 border-slate-800 border-2 p-3.5 rounded-2xl flex justify-between items-center cursor-pointer hover:border-indigo-500 transition shadow-lg">
+                        <span className="text-sm font-medium text-white truncate">{selected || placeholder}</span>
+                        <Icon d={paths.chevron} className={`w-4 h-4 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    </div>
+                    {isOpen && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-[150] overflow-hidden">
+                            <div className="p-2 border-b border-slate-800"><input autoFocus type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search..." className="w-full bg-slate-950 border-slate-800 border p-2 rounded-xl outline-none text-xs text-indigo-400" /></div>
+                            <div className="max-h-64 overflow-y-auto custom-scroll">{filtered.length > 0 ? filtered.map(item => (<div key={item.name} onClick={() => { onSelect(item.name); setIsOpen(false); setQuery(''); }} className={`p-3 text-sm cursor-pointer hover:bg-indigo-600/20 hover:text-indigo-300 transition ${selected === item.name ? 'text-indigo-400 bg-indigo-500/5 font-bold' : 'text-slate-300'}`}>{item.name}</div>)) : <div className="p-4 text-xs text-slate-600 italic text-center">No matches</div>}</div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        function GitHubDeploymentAgent() {
+          const logEndRef = useRef(null);
+          const [activeTab, setActiveTab] = useState('deploy');
+          
+          const [token, setToken] = useState(() => localStorage.getItem('gh_token') || '');
+          const [repo, setRepo] = useState(() => localStorage.getItem('gh_repo') || '');
+          const [jiraUser, setJiraUser] = useState(() => localStorage.getItem('jira_user') || '');
+          const [jiraToken, setJiraToken] = useState(() => localStorage.getItem('jira_token') || '');
+          const [jiraDomain, setJiraDomain] = useState(() => localStorage.getItem('jira_domain') || 'sig-jm.atlassian.net');
+
+          const [branches, setBranches] = useState([]);
+          const [commits, setCommits] = useState([]);
+          const [baseBranch, setBaseBranch] = useState(''); 
+          const [sourceBranch, setSourceBranch] = useState('main'); 
+          const [newBranchName, setNewBranchName] = useState(''); 
+          const [selectedCommits, setSelectedCommits] = useState([]);
+          const [searchTerm, setSearchTerm] = useState('');
+          const [status, setStatus] = useState({ type: '', message: '', link: '', copyVal: '' });
+          const [isConfigured, setIsConfigured] = useState(false);
+          const [loading, setLoading] = useState(false);
+          const [logs, setLogs] = useState([]);
+          const [baseFingerprints, setBaseFingerprints] = useState(new Set()); 
+          const [dependencyWarnings, setDependencyWarnings] = useState([]);
+          const [currentFileNames, setCurrentFileNames] = useState([]);
+          const [deltaCommits, setDeltaCommits] = useState([]);
+          const [compareMain, setCompareMain] = useState('');
+          const [compareSub, setCompareSub] = useState('');
+
+          const headers = { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' };
+          const addLog = (msg) => setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+          useEffect(() => { if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
+          
+          useEffect(() => { if (token && repo) initialize(); }, []);
+
+          const initialize = async () => {
+            setLoading(true);
+            try {
+              let all = []; let page = 1; let more = true;
+              while (more) {
+                const res = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=100&page=${page}`, { headers });
+                const data = await res.json();
+                all = [...all, ...data];
+                if (data.length < 100) more = false; else page++;
+              }
+              localStorage.setItem('gh_token', token);
+              localStorage.setItem('gh_repo', repo);
+              localStorage.setItem('jira_user', jiraUser);
+              localStorage.setItem('jira_token', jiraToken);
+              localStorage.setItem('jira_domain', jiraDomain);
+              setBranches(all); setIsConfigured(true);
+              const main = all.find(b => b.name === 'main' || b.name === 'master')?.name || all[0].name;
+              setSourceBranch(main); fetchCommits(main);
+            } catch (e) { setStatus({ type: 'error', message: "Initialization Failed." }); }
+            setLoading(false);
+          };
+
+          const handleLogout = () => { localStorage.clear(); setToken(''); setRepo(''); setJiraUser(''); setJiraToken(''); setIsConfigured(false); setBranches([]); setCommits([]); };
+
+          const fetchCommits = async (branch) => {
+            setLoading(true);
+            try {
+              const res = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${branch}&per_page=50`, { headers });
+              const data = await res.json(); setCommits(data);
+            } catch (e) { console.error(e); }
+            setLoading(false);
+          };
+
+          useEffect(() => {
+            const checkBase = async () => {
+              if (!baseBranch) return;
+              const res = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${baseBranch}&per_page=100`, { headers });
+              const data = await res.json();
+              setBaseFingerprints(new Set(data.map(c => `${c.commit.message.split('\n')[0].trim().toLowerCase()}_${new Date(c.commit.author.date).getTime()}`)));
+            };
+            checkBase();
+          }, [baseBranch]);
+
+          const validateAndMap = async () => {
+              if (selectedCommits.length === 0) { setDependencyWarnings([]); setCurrentFileNames([]); return; }
+              const warnings = [];
+              const files = [];
+              const fileMaps = await Promise.all(selectedCommits.map(async (sha) => {
+                  const res = await fetch(`https://api.github.com/repos/${repo}/commits/${sha}`, { headers });
+                  const data = await res.json();
+                  files.push(...data.files.map(f => f.filename));
+                  return { sha, files: data.files.map(f => f.filename) };
+              }));
+              setCurrentFileNames([...new Set(files)]);
+              for (const current of fileMaps) {
+                  const idx = commits.findIndex(c => c.sha === current.sha);
+                  const older = commits.slice(idx + 1, idx + 15);
+                  for (const o of older) {
+                      const msg = o.commit.message.split('\n')[0].trim().toLowerCase();
+                      const ts = new Date(o.commit.author.date).getTime();
+                      if (baseFingerprints.has(`${msg}_${ts}`) || selectedCommits.includes(o.sha)) continue;
+                      const res = await fetch(`https://api.github.com/repos/${repo}/commits/${o.sha}`, { headers });
+                      const d = await res.json();
+                      if (current.files.some(f => d.files.map(of => of.filename).includes(f))) {
+                          warnings.push(`Warning: ${current.sha.substring(0,7)} shares files with unselected task: ${msg}`);
+                      }
+                  }
+              }
+              setDependencyWarnings([...new Set(warnings)]);
+          };
+
+          useEffect(() => { if(activeTab === 'deploy') validateAndMap(); }, [selectedCommits, baseFingerprints]);
+
+          // --- FIXED: JIRA COMMENTING WITH ABSOLUTE LINKS ---
+          const postJiraComment = async (issueKey, originalCommitSha, branchName) => {
+              if (!jiraUser || !jiraToken) return;
+              
+              const auth = btoa(`${jiraUser}:${jiraToken}`);
+              const url = `http://localhost:8080/jira/rest/api/2/issue/${issueKey}/comment`;
+              
+              // Build Absolute URLs
+              const branchLink = `https://github.com/${repo}/tree/${branchName}`;
+              const commitLink = `https://github.com/${repo}/commit/${originalCommitSha}`;
+              
+              const commentBody = {
+                  body: `🚀 *Deployment Notification*\n\nLogic has been patched to release branch.\n*Branch:* ${branchLink}\n*Source Commit:* ${commitLink}`
+              };
+
+              try {
+                  const res = await fetch(url, {
+                      method: 'POST',
+                      headers: {
+                          'Authorization': `Basic ${auth}`,
+                          'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify(commentBody)
+                  });
+
+                  if (res.status === 201) addLog(`✅ Jira comment added to ${issueKey}`);
+                  else addLog(`❌ Jira Error: ${res.status}`);
+              } catch (e) {
+                  addLog(`❌ Bridge Offline: Please run 'node jira-bridge.js'`);
+              }
+          };
+
+          const executeDeployment = async () => {
+            if (!newBranchName || !baseBranch) return;
+            setLoading(true); setLogs([]);
+            try {
+              const baseRef = await (await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${baseBranch}`, { headers })).json();
+              let currentSha = baseRef.object.sha;
+              const baseCommit = await (await fetch(`https://api.github.com/repos/${repo}/git/commits/${currentSha}`, { headers })).json();
+              let currentTreeSha = baseCommit.tree.sha;
+
+              await fetch(`https://api.github.com/repos/${repo}/git/refs`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: `refs/heads/${newBranchName}`, sha: currentSha }) });
+
+              const picks = commits.filter(c => selectedCommits.includes(c.sha)).reverse();
+              for (const pick of picks) {
+                addLog(`Patching: ${pick.commit.message.split('\n')[0]}`);
+                const comp = await (await fetch(`https://api.github.com/repos/${repo}/compare/${pick.sha}^...${pick.sha}`, { headers })).json();
+                const tree = await (await fetch(`https://api.github.com/repos/${repo}/git/trees`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ base_tree: currentTreeSha, tree: comp.files.map(f => ({ path: f.filename, mode: "100644", type: "blob", sha: f.sha })) }) })).json();
+                currentTreeSha = tree.sha;
+                const nc = await (await fetch(`https://api.github.com/repos/${repo}/git/commits`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: pick.commit.message, tree: currentTreeSha, parents: [currentSha], author: pick.commit.author, committer: pick.commit.committer }) })).json();
+                currentSha = nc.sha;
+                await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${newBranchName}`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ sha: currentSha, force: true }) });
+                
+                // TRIGGER JIRA SYNC with ORIGINAL SHA
+                const jiraKey = pick.commit.message.match(/ISCAR-\d+/i);
+                if (jiraKey) await postJiraComment(jiraKey[0], pick.sha, newBranchName);
+              }
+              setStatus({ type: 'success', message: `✅ Deployed `, link: `https://github.com/${repo}/tree/${newBranchName}`, copyVal: `https://github.com/${repo}/tree/${newBranchName}` });
+            } catch (e) { setStatus({ type: 'error', message: e.message }); }
+            setLoading(false);
+          };
+
+          const runComparison = async () => {
+            setLoading(true);
+            try {
+                const masterRes = await fetch(`https://api.github.com/repos/${repo}/commits?sha=master&per_page=100`, { headers });
+                const masterData = await masterRes.json();
+                const masterMap = new Map(masterData.map(c => [`${c.commit.message.split('\n')[0].trim().toLowerCase()}_${new Date(c.commit.author.date).getTime()}`, c]));
+                const mainRes = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${compareMain}&per_page=100`, { headers });
+                const mainData = await mainRes.json();
+                const mainPrints = new Set(mainData.map(c => `${c.commit.message.split('\n')[0].trim().toLowerCase()}_${new Date(c.commit.author.date).getTime()}`));
+                const subRes = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${compareSub}&per_page=100`, { headers });
+                const subData = await subRes.json();
+                const missing = subData.reduce((acc, c) => {
+                    const msg = c.commit.message.split('\n')[0].trim().toLowerCase();
+                    const ts = new Date(c.commit.author.date).getTime();
+                    const print = `${msg}_${ts}`;
+                    if (!mainPrints.has(print) && masterMap.has(print)) acc.push(masterMap.get(print));
+                    return acc;
+                }, []);
+                setDeltaCommits(missing);
+            } catch (e) { console.error(e); }
+            setLoading(false);
+          };
+
+          const portToDeploy = () => {
+              setSelectedCommits(deltaCommits.map(c => c.sha));
+              setSourceBranch('master'); setBaseBranch(compareMain);
+              fetchCommits('master'); setActiveTab('deploy');
+          };
+
+          const reminders = useMemo(() => {
+              const r = [];
+              if (currentFileNames.some(f => f.endsWith('.js'))) r.push("Clear memcache and CF cache.");
+              if (currentFileNames.some(f => f.toLowerCase().includes('dbm'))) r.push("Upgrade DBM.");
+              if (currentFileNames.some(f => f.endsWith('package.json'))) r.push("Run npm install.");
+              return r;
+          }, [currentFileNames]);
+
+          if (!isConfigured) {
+            return (
+              <div className="min-h-screen flex items-center justify-center bg-[#020617] p-6 text-white text-center">
+                <div className="bg-slate-900 border border-slate-800 p-10 rounded-[2rem] w-full max-w-xl shadow-2xl">
+                    <h1 className="text-2xl font-black mb-8 uppercase tracking-tighter">Merger Connection</h1>
+                    <div className="grid grid-cols-2 gap-4 text-left">
+                        <div className="space-y-4 col-span-2 md:col-span-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">GitHub Access</label>
+                            <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="GitHub Token" className="w-full bg-slate-950 border-slate-800 border-2 p-4 rounded-xl outline-none text-xs" />
+                            <input type="text" value={repo} onChange={e => setRepo(e.target.value)} placeholder="owner/repo" className="w-full bg-slate-950 border-slate-800 border-2 p-4 rounded-xl outline-none text-xs" />
+                        </div>
+                        <div className="space-y-4 col-span-2 md:col-span-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Jira Integration (Optional)</label>
+                            <input type="text" value={jiraUser} onChange={e => setJiraUser(e.target.value)} placeholder="email@example.com" className="w-full bg-slate-950 border-slate-800 border-2 p-4 rounded-xl outline-none text-xs" />
+                            <input type="password" value={jiraToken} onChange={e => setJiraToken(e.target.value)} placeholder="Jira API Token" className="w-full bg-slate-950 border-slate-800 border-2 p-4 rounded-xl outline-none text-xs" />
+                        </div>
+                    </div>
+                    <button onClick={initialize} className="w-full bg-indigo-600 py-4 mt-8 rounded-xl font-black uppercase active:scale-95 transition-transform">Connect Agent</button>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="max-w-[1750px] mx-auto px-10 py-10 pb-[450px] text-white">
+                <div className="flex justify-between items-end mb-10">
+                    <div>
+                        <h1 className="text-4xl font-black tracking-tighter mb-4">The Merger 1.0</h1>
+                        <nav className="flex gap-8 border-b border-slate-800">
+                            <button onClick={() => setActiveTab('deploy')} className={`pb-4 text-xs font-black uppercase tracking-widest ${activeTab === 'deploy' ? 'tab-active' : 'text-slate-500 hover:text-slate-300'}`}>Deploy</button>
+                            <button onClick={() => setActiveTab('compare')} className={`pb-4 text-xs font-black uppercase tracking-widest ${activeTab === 'compare' ? 'tab-active' : 'text-slate-500 hover:text-slate-300'}`}>Compare</button>
+                        </nav>
+                    </div>
+                    <button onClick={handleLogout} className="text-slate-500 hover:text-rose-400 font-bold text-xs uppercase tracking-widest flex items-center gap-2 transition-colors"><Icon d={paths.logout} /> Sign Out</button>
+                </div>
+
+                {activeTab === 'deploy' ? (
+                    <div className="grid lg:grid-cols-12 gap-10 items-start animate-in fade-in duration-500">
+                        <div className="lg:col-span-3 space-y-6">
+                            <div className="bg-slate-900 border border-slate-800 p-6 rounded-[2rem] shadow-xl">
+                                <SearchableDropdown label="1. Source Feed" items={branches} selected={sourceBranch} onSelect={(v) => { setSourceBranch(v); fetchCommits(v); }} />
+                                <SearchableDropdown label="2. Base Branch" items={branches} selected={baseBranch} onSelect={setBaseBranch} />
+                                <div className="mt-4"><label className="text-[10px] font-black text-slate-500 uppercase ml-1">3. Output Name</label><input type="text" value={newBranchName} onChange={e => setNewBranchName(e.target.value)} placeholder="v29.x.x" className="w-full bg-slate-950 border-slate-800 border-2 p-3.5 rounded-2xl mt-1 outline-none text-sm text-white" /></div>
+                                <button onClick={executeDeployment} disabled={loading || !newBranchName || !baseBranch} className="w-full bg-indigo-600 mt-6 py-4 rounded-2xl font-black shadow-lg uppercase text-xs tracking-widest active:scale-95">Create Version</button>
+                            </div>
+                            {status.message && (
+                                <div className={`p-5 rounded-2xl border-2 flex flex-col gap-2 ${status.type === 'error' ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'}`}>
+                                    <div className="text-sm font-bold flex items-center gap-2">{status.message} {status.link && <a href={status.link} target="_blank" className="underline">{status.link.split('/').pop()}</a>} {status.copyVal && <button onClick={() => navigator.clipboard.writeText(status.copyVal)} className="p-1.5 bg-emerald-500/20 rounded-lg"><Icon d={paths.copy} className="w-3 h-3" /></button>}</div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="lg:col-span-6 space-y-4">
+                            <div className="relative group">
+                                <Icon d={paths.search} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5 group-focus-within:text-indigo-400 transition-colors" />
+                                <input type="text" placeholder="Search tasks..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full bg-slate-950 border-slate-800 border-2 py-4 pl-14 pr-6 rounded-[1.5rem] outline-none focus:border-indigo-500 transition shadow-2xl text-white" />
+                            </div>
+                            <div className="space-y-3 max-h-[850px] overflow-y-auto pr-4 custom-scroll">
+                                {commits.filter(c => c.commit.message.toLowerCase().includes(searchTerm.toLowerCase())).map(commit => {
+                                    const msg = commit.commit.message.split('\n')[0].trim();
+                                    const isSelected = selectedCommits.includes(commit.sha);
+                                    const ts = new Date(commit.commit.author.date).getTime();
+                                    const inBase = baseFingerprints.has(`${msg.toLowerCase()}_${ts}`);
+                                    const jira = msg.match(/ISCAR-\d+/i);
+                                    return (
+                                        <div key={commit.sha} onClick={() => setSelectedCommits(p => isSelected ? p.filter(s => s !== commit.sha) : [...p, commit.sha])} className={`p-5 border-2 rounded-[2rem] flex items-center gap-5 cursor-pointer transition-all ${isSelected ? 'bg-indigo-600 border-indigo-400 shadow-xl scale-[1.01]' : 'bg-slate-900 border-slate-800 hover:border-slate-700'}`}>
+                                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${isSelected ? 'bg-white' : 'border-slate-700'}`}>{isSelected && <Icon d={paths.check} className="text-indigo-600 w-4 h-4" />}</div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-bold truncate text-sm text-slate-100">{msg} {inBase && <span className="ml-2 text-[9px] bg-emerald-500 text-emerald-950 px-2 rounded font-black uppercase tracking-tighter">In Base</span>}</p>
+                                                <p className="text-[10px] text-slate-500 font-mono mt-0.5 uppercase">{commit.sha.substring(0,10)} • {commit.commit.author.name}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                {jira && <a href={`https://sig-jm.atlassian.net/browse/${jira[0]}`} target="_blank" onClick={e => e.stopPropagation()} className="p-2 bg-blue-500/10 rounded-xl text-blue-400 hover:bg-blue-500/20 transition-colors"><Icon d={paths.jira} className="w-4 h-4" /></a>}
+                                                <a href={`https://github.com/${repo}/commit/${commit.sha}`} target="_blank" onClick={e => e.stopPropagation()} className="p-2 bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"><Icon d={paths.github} className="w-4 h-4" /></a>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-3 space-y-6 sticky top-8">
+                            {dependencyWarnings.length > 0 && (
+                                <div className="p-6 rounded-[2rem] bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-medium leading-relaxed shadow-xl">
+                                    <div className="flex items-center gap-2 font-black uppercase tracking-widest mb-3 text-amber-500"><Icon d={paths.alert} className="w-4 h-4" /> Conflicts</div>
+                                    {dependencyWarnings.map((w, i) => <div key={i} className="mb-2 pb-2 border-b border-amber-500/10 last:border-0">{w}</div>)}
+                                </div>
+                            )}
+                            <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2rem] shadow-xl">
+                                <h3 className="text-[10px] font-black uppercase text-indigo-400 mb-6 tracking-[0.2em] flex items-center gap-2"><Icon d={paths.lightning} className="w-3 h-3" /> Checklist</h3>
+                                <div className="space-y-4">
+                                    {reminders.length > 0 ? reminders.map((r, i) => (<div key={i} className="flex gap-4 p-4 rounded-2xl bg-slate-950 border border-slate-800 animate-in slide-in-from-right"><div className="w-1 bg-indigo-500 rounded-full"></div><p className="text-xs text-slate-300 font-medium">{r}</p></div>)) : <p className="text-[11px] text-slate-600 italic">Select tasks to see reminders...</p>}
+                                </div>
+                            </div>
+                            <div className="bg-slate-950/40 border border-dashed border-slate-800 p-6 rounded-[2rem]">
+                                <h4 className="text-[10px] font-bold text-slate-600 uppercase mb-4 ml-1 tracking-widest">Live File Map</h4>
+                                <div className="flex flex-wrap gap-2">
+                                    {currentFileNames.length > 0 ? currentFileNames.slice(0, 15).map((f, i) => (<span key={i} className="text-[9px] mono px-2 py-1 bg-slate-900 border border-slate-800 text-slate-500 rounded truncate max-w-full">{f.split('/').pop()}</span>)) : <span className="text-[10px] text-slate-800 italic">No files tracked</span>}
+                                    {currentFileNames.length > 15 && <span className="text-[9px] text-slate-700">+{currentFileNames.length - 15} more</span>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="animate-in fade-in duration-500">
+                        <div className="bg-slate-900 border border-slate-800 p-8 rounded-[3rem] shadow-2xl mb-10 flex flex-col md:flex-row gap-8 items-end">
+                            <div className="flex-1 w-full"><SearchableDropdown label="Target Branch" items={branches} selected={compareMain} onSelect={setCompareMain} /></div>
+                            <div className="flex-1 w-full"><SearchableDropdown label="Source Branch" items={branches} selected={compareSub} onSelect={setCompareSub} /></div>
+                            <button onClick={runComparison} disabled={loading || !compareMain || !compareSub} className="h-[54px] bg-emerald-600 px-8 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center gap-3 transition-transform active:scale-95"><Icon d={paths.compare} /> {loading ? 'Scanning...' : 'Identify Logic Gap'}</button>
+                        </div>
+                        {deltaCommits.length > 0 ? (
+                            <div className="grid lg:grid-cols-12 gap-10 items-start">
+                                <div className="lg:col-span-4 space-y-6 sticky top-8">
+                                    <div className="p-8 rounded-[2rem] bg-indigo-500/10 border border-indigo-500/20 shadow-xl text-center">
+                                        <h3 className="text-4xl font-black text-indigo-400">{deltaCommits.length}</h3>
+                                        <p className="text-[10px] text-slate-500 font-black uppercase mt-2 tracking-widest leading-relaxed">Verified Missing Commits</p>
+                                        <button onClick={portToDeploy} className="w-full bg-indigo-600 hover:bg-indigo-500 py-5 mt-6 rounded-[1.5rem] font-black uppercase text-[10px] tracking-[0.2em] flex items-center justify-center gap-3 active:scale-95 transition-all shadow-2xl">
+                                            <Icon d={paths.rocket} className="w-4 h-4" /> Port Missing Tasks to Deploy
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="lg:col-span-8 space-y-4">
+                                    {deltaCommits.map(c => {
+                                        const m = c.commit.message.split('\n')[0].trim();
+                                        const j = m.match(/ISCAR-\d+/i);
+                                        return (
+                                            <div key={c.sha} className="p-6 bg-slate-900 border border-slate-800 rounded-[2rem] flex items-center justify-between group hover:border-indigo-500/50 transition-colors">
+                                                <div><p className="font-bold mb-1 text-sm text-slate-100">{m}</p><p className="text-[10px] text-slate-600 font-mono tracking-tighter uppercase">{c.sha.substring(0,10)} • Master SHA</p></div>
+                                                <div className="flex gap-2">
+                                                    {j && <a href={`https://sig-jm.atlassian.net/browse/${j[0]}`} target="_blank" className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400 hover:bg-blue-500/20 transition-colors"><Icon d={paths.jira} /></a>}
+                                                    <a href={`https://github.com/${repo}/commit/${c.sha}`} target="_blank" className="p-2.5 bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors"><Icon d={paths.github} /></a>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : !loading && compareMain && (
+                            <div className="py-32 border-4 border-dashed border-slate-900 rounded-[4rem] text-center text-slate-800 font-black uppercase tracking-[0.3em]">No Logic Gap detected</div>
+                        )}
+                    </div>
+                )}
+
+                <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#020617]/95 backdrop-blur-xl border-t border-slate-800 z-[200]">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="flex items-center gap-2 mb-2 text-slate-500 font-black text-[10px] uppercase tracking-[0.2em]"><Icon d={paths.terminal} className="w-3 h-3 text-emerald-500" /> Git & Jira Trace Log</div>
+                        <div className="bg-black/40 border border-slate-800/50 rounded-xl p-4 h-24 overflow-y-auto custom-scroll mono text-[10px] text-emerald-400/70 leading-relaxed shadow-inner">
+                            {logs.map((log, i) => <div key={i} className="mb-1 border-l border-emerald-500/20 pl-2">{log}</div>)}
+                            <div ref={logEndRef} />
+                        </div>
+                    </div>
+                </div>
+            </div>
+          );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<GitHubDeploymentAgent />);
+    </script>
+</body>
+</html>
